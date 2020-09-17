@@ -60,6 +60,12 @@ module TextTable
   end
 end
 
+module TextFormatting
+  def self.prompt(message)
+    puts ">> " + message
+  end
+end
+
 class Score
   attr_accessor :value
 
@@ -112,10 +118,10 @@ class Human < Player
     answer = ''
 
     loop do
-      puts "What is your name?"
+      TextFormatting.prompt "What is your name?"
       answer = gets.chomp
       break unless answer.empty?
-      puts "Sorry, must enter a value."
+      TextFormatting.prompt "Sorry, must enter a value."
     end
 
     @name = answer
@@ -125,10 +131,10 @@ class Human < Player
     choice = nil
 
     loop do
-      puts "Please choose #{Move::VALUES.join(', ')}:"
+      TextFormatting.prompt "Please choose #{Move::VALUES.join(', ')}:"
       choice = gets.chomp.capitalize
       break if Move::VALUES.include?(choice)
-      puts "Sorry, invalid choice."
+      TextFormatting.prompt "Sorry, invalid choice."
     end
 
     self.move = choice
@@ -196,15 +202,17 @@ class Number5 < Player
 end
 
 class History
-  attr_reader :log, :log_heading
+  attr_reader :log, :log_heading, :player1, :player2
 
   def initialize(player1, player2)
-    @log_heading = ['Round #', player1, player2]
+    @player1 = player1
+    @player2 = player2
+    @log_heading = ['Round #', player1.name, player2.name, 'Winner']
     @log = []
   end
 
-  def <<(moves)
-    @log << moves
+  def <<(round_history)
+    @log << round_history
   end
 
   def display
@@ -285,55 +293,67 @@ class RPSGame # Orchestration engine
   def initialize
     self.human = Human.new
     self.computer = [R2D2, Hal, Chappie, Sonny, Number5].sample.new
-    @history = History.new(human.name, computer.name)
+    @history = History.new(human, computer)
   end
 
   def display_welcome_message
-    puts "Welcome to #{Move::VALUES.join(', ')}!"
-    puts "Win #{WIN_CONDITION} rounds to win the game!"
-    puts "------------------"
+    system 'clear'
+    message = []
+    message << ["Welcome to #{Move::VALUES.join(', ')}, #{human.name}!"]
+    message << ["You will be playing against #{computer.name}"]
+    message << ["Win #{WIN_CONDITION} rounds to win the game!"]
+    
+    TextTable.display(message)
   end
 
   def display_goodbye_message
-    puts "Thanks for playing #{Move::VALUES.join(', ')}.  Good bye!"
+    TextFormatting.prompt "Thanks for playing #{Move::VALUES.join(', ')}.  Good bye!"
   end
 
   def display_moves
-    puts "#{human.name} chose #{human.move}"
-    puts "#{computer.name} chose #{computer.move}"
+    TextFormatting.prompt "#{human.name} chose #{human.move}"
+    TextFormatting.prompt "#{computer.name} chose #{computer.move}"
+  end
+
+  def update_history(winner)
+    history << [human.move, computer.move, winner]
   end
 
   def update_score
     if human.move > computer.move
       human.score.increment
+      update_history(human.name)
     elsif human.move < computer.move
       computer.score.increment
+      update_history(computer.name)
+    else
+      update_history('Tie')
     end
   end
 
   def display_winner
     if human.move > computer.move
-      puts "#{human.name} won!"
+      TextFormatting.prompt "#{human.name} won!"
     elsif human.move < computer.move
-      puts "#{computer.name} won!"
+      TextFormatting.prompt "#{computer.name} won!"
     else
-      puts "It's a tie!"
+      TextFormatting.prompt "It's a tie!"
     end
   end
 
   def display_score
-    puts "The current score is #{human.name}: #{human.score} and "\
+    TextFormatting.prompt "The current score is #{human.name}: #{human.score} and "\
       "#{computer.name}: #{computer.score}"
   end
 
   def play_again?
-    puts "Do you want to play again? (y/n)"
+    TextFormatting.prompt "Do you want to play again? (y/n)"
     answer = nil
 
     loop do
       answer = gets.chomp.downcase
       break if ['y', 'n'].include?(answer)
-      puts "Sorry, must be y or n."
+      TextFormatting.prompt "Sorry, must be y or n."
     end
 
     answer == 'y'
@@ -342,7 +362,7 @@ class RPSGame # Orchestration engine
   def display_game_winner
     [human, computer].each do |player|
       if player.winner?
-        puts "#{player.name} has reached #{WIN_CONDITION} points.  They win!"
+        TextFormatting.prompt "#{player.name} has reached #{WIN_CONDITION} points.  #{player.name} wins!"
         human.score.reset
         computer.score.reset
         break
@@ -351,13 +371,13 @@ class RPSGame # Orchestration engine
   end
 
   def display_history
-    puts "Do you want to see the move history? (y/n)"
+    TextFormatting.prompt "Do you want to see the game history? (y/n)"
     answer = nil
 
     loop do
       answer = gets.chomp.downcase
       break if ['y', 'n'].include?(answer)
-      puts "Sorry, must be y or n."
+      TextFormatting.prompt "Sorry, must be y or n."
     end
 
     history.display if answer == 'y'
@@ -366,7 +386,6 @@ class RPSGame # Orchestration engine
   def player_turns
     human.choose
     computer.choose
-    history << [human.move, computer.move]
     display_moves
   end
 
@@ -380,6 +399,7 @@ class RPSGame # Orchestration engine
       display_score
       display_game_winner
       break unless play_again?
+      system 'clear'
     end
 
     display_history
