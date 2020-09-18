@@ -1,4 +1,9 @@
-module TextTable
+require 'yaml'
+
+MSG = YAML.load_file('rpsls_messages.yml')
+YES_NO = ['y', 'yes', 'n', 'no']
+
+module Table
   CONNECTOR = '+'
   H_SPACER = '-'
   V_SPACER = '|'
@@ -60,7 +65,7 @@ module TextTable
   end
 end
 
-module TextFormatting
+module Formatting
   def self.prompt(message)
     puts ">> " + message
   end
@@ -115,13 +120,14 @@ end
 
 class Human < Player
   def set_name
+    system 'clear'
     answer = ''
 
     loop do
-      TextFormatting.prompt "What is your name?"
+      Formatting.prompt MSG['ask_name']
       answer = gets.chomp
       break unless answer.empty?
-      TextFormatting.prompt "Sorry, must enter a value."
+      Formatting.prompt MSG['empty_ans']
     end
 
     @name = answer
@@ -131,10 +137,10 @@ class Human < Player
     choice = nil
 
     loop do
-      TextFormatting.prompt "Please choose #{Move::VALUES.join(', ')}:"
+      Formatting.prompt format(MSG['choose'], choices: Move::VALUES.join(', '))
       choice = gets.chomp.capitalize
       break if Move::VALUES.include?(choice)
-      TextFormatting.prompt "Sorry, invalid choice."
+      Formatting.prompt MSG['invalid_choice']
     end
 
     self.move = choice
@@ -220,12 +226,14 @@ class History
       [index + 1] + moves
     end
 
-    puts TextTable.display(rows.prepend(@log_heading), true)
+    puts Table.display(rows.prepend(@log_heading), true)
   end
 end
 
 class Move
   VALUES = %w(Rock Paper Scissors Lizard Spock)
+
+  attr_reader :value
 
   def initialize
     @value = to_s
@@ -236,11 +244,11 @@ class Move
   end
 
   def >(other_move)
-    @win_against.include?(other_move.to_s)
+    @win_against.include?(other_move.value)
   end
 
   def <(other_move)
-    @lose_against.include?(other_move.to_s)
+    @lose_against.include?(other_move.value)
   end
 end
 
@@ -298,71 +306,85 @@ class RPSGame # Orchestration engine
 
   def display_welcome_message
     system 'clear'
-    message = []
-    message << ["Welcome to #{Move::VALUES.join(', ')}, #{human.name}!"]
-    message << ["You will be playing against #{computer.name}"]
-    message << ["Win #{WIN_CONDITION} rounds to win the game!"]
-    
-    TextTable.display(message)
+    message = [
+      [format(MSG['welcome'],
+              game: Move::VALUES.join(', '), player: human.name)],
+      [format(MSG['playing_against'], opponent: computer.name)],
+      [format(MSG['win_condition'], num: WIN_CONDITION)]
+    ]
+
+    Table.display(message)
   end
 
   def display_goodbye_message
-    TextFormatting.prompt "Thanks for playing #{Move::VALUES.join(', ')}.  Good bye!"
+    Formatting.prompt format(MSG['goodbye'], game: Move::VALUES.join(', '))
   end
 
   def display_moves
-    TextFormatting.prompt "#{human.name} chose #{human.move}"
-    TextFormatting.prompt "#{computer.name} chose #{computer.move}"
+    Formatting.prompt format(MSG['move'],
+                             player: human.name, move: human.move)
+    Formatting.prompt format(MSG['move'],
+                             player: computer.name, move: computer.move)
   end
 
-  def update_history(winner)
-    history << [human.move, computer.move, winner]
+  def update_history(winner_name)
+    history << [human.move, computer.move, winner_name]
   end
 
-  def update_score
-    if human.move > computer.move
-      human.score.increment
-      update_history(human.name)
-    elsif human.move < computer.move
-      computer.score.increment
-      update_history(computer.name)
+  def display_winner(winner_name)
+    Formatting.prompt format(MSG['won'], player: winner_name)
+  end
+
+  def round_result
+    winner = round_winner
+
+    if !!winner
+      display_winner(winner.name)
+      winner.score.increment
+      update_history(winner.name)
     else
+      Formatting.prompt MSG['tie']
       update_history('Tie')
     end
+
+    display_score
   end
 
-  def display_winner
+  def round_winner
     if human.move > computer.move
-      TextFormatting.prompt "#{human.name} won!"
+      human
     elsif human.move < computer.move
-      TextFormatting.prompt "#{computer.name} won!"
-    else
-      TextFormatting.prompt "It's a tie!"
+      computer
     end
   end
 
   def display_score
-    TextFormatting.prompt "The current score is #{human.name}: #{human.score} and "\
-      "#{computer.name}: #{computer.score}"
+    message =
+      [[format(MSG['current_score'],
+               p1: human.name, p1_score: human.score,
+               p2: computer.name, p2_score: computer.score)]]
+
+    Table.display(message)
   end
 
   def play_again?
-    TextFormatting.prompt "Do you want to play again? (y/n)"
     answer = nil
 
     loop do
+      Formatting.prompt MSG['play_again']
       answer = gets.chomp.downcase
-      break if ['y', 'n'].include?(answer)
-      TextFormatting.prompt "Sorry, must be y or n."
+      break if YES_NO.include?(answer)
+      Formatting.prompt MSG['invalid_choice']
     end
 
-    answer == 'y'
+    ['y', 'yes'].include?(answer)
   end
 
   def display_game_winner
     [human, computer].each do |player|
       if player.winner?
-        TextFormatting.prompt "#{player.name} has reached #{WIN_CONDITION} points.  #{player.name} wins!"
+        Formatting.prompt format(MSG['game_winner'],
+                                 player: player.name, num: WIN_CONDITION)
         human.score.reset
         computer.score.reset
         break
@@ -371,16 +393,16 @@ class RPSGame # Orchestration engine
   end
 
   def display_history
-    TextFormatting.prompt "Do you want to see the game history? (y/n)"
     answer = nil
 
     loop do
+      Formatting.prompt MSG['see_history']
       answer = gets.chomp.downcase
-      break if ['y', 'n'].include?(answer)
-      TextFormatting.prompt "Sorry, must be y or n."
+      break if YES_NO.include?(answer)
+      Formatting.prompt MSG['invalid_choice']
     end
 
-    history.display if answer == 'y'
+    history.display if ['y', 'yes'].include?(answer)
   end
 
   def player_turns
@@ -394,9 +416,7 @@ class RPSGame # Orchestration engine
 
     loop do
       player_turns
-      display_winner
-      update_score
-      display_score
+      round_result
       display_game_winner
       break unless play_again?
       system 'clear'
