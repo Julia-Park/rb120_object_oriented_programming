@@ -1,12 +1,20 @@
 require 'yaml'
 
 MSG = YAML.load_file('rpsls_messages.yml')
-YES_NO = ['y', 'yes', 'n', 'no']
 
 module Table
   CONNECTOR = '+'
   H_SPACER = '-'
   V_SPACER = '|'
+
+  def self.display(rows, first_row_header = false)
+    num_columns = number_of_columns(rows)
+    widths = column_widths(rows)
+    h_line = create_line(widths)
+    formatted_rows = rows.map { |row| format_row(row, num_columns, widths) }
+
+    display_rows(formatted_rows, h_line, first_row_header)
+  end
 
   def self.number_of_columns(rows) # => integer
     rows.max { |a, b| a.size <=> b.size }.size
@@ -54,15 +62,6 @@ module Table
 
     puts h_line # last line
   end
-
-  def self.display(rows, first_row_header = false)
-    num_columns = number_of_columns(rows)
-    widths = column_widths(rows)
-    h_line = create_line(widths)
-    formatted_rows = rows.map { |row| format_row(row, num_columns, widths) }
-
-    display_rows(formatted_rows, h_line, first_row_header)
-  end
 end
 
 module Formatting
@@ -72,7 +71,7 @@ module Formatting
 end
 
 class Score
-  attr_accessor :value
+  attr_reader :value
 
   def initialize
     reset
@@ -93,6 +92,10 @@ class Score
   def >=(condition)
     value >= condition
   end
+
+  private
+
+  attr_writer :value
 end
 
 class Player
@@ -208,8 +211,6 @@ class Number5 < Player
 end
 
 class History
-  attr_reader :log, :log_heading, :player1, :player2
-
   def initialize(player1, player2)
     @player1 = player1
     @player2 = player2
@@ -228,12 +229,14 @@ class History
 
     puts Table.display(rows.prepend(@log_heading), true)
   end
+
+  private
+
+  attr_reader :log, :log_heading, :player1, :player2
 end
 
 class Move
   VALUES = %w(Rock Paper Scissors Lizard Spock)
-
-  attr_reader :value
 
   def initialize
     @value = to_s
@@ -250,6 +253,10 @@ class Move
   def <(other_move)
     @lose_against.include?(other_move.value)
   end
+
+  protected
+
+  attr_reader :value
 end
 
 class Rock < Move
@@ -294,15 +301,33 @@ end
 
 class RPSGame # Orchestration engine
   WIN_CONDITION = 5
-
-  attr_accessor :human, :computer
-  attr_reader :history
+  YES_NO = ['y', 'yes', 'n', 'no']
 
   def initialize
     self.human = Human.new
     self.computer = [R2D2, Hal, Chappie, Sonny, Number5].sample.new
     @history = History.new(human, computer)
   end
+
+  def play
+    display_welcome_message
+
+    loop do
+      player_turns
+      round_result
+      display_game_winner
+      break unless play_again?
+      system 'clear'
+    end
+
+    display_history
+    display_goodbye_message
+  end
+
+  private
+
+  attr_accessor :human, :computer
+  attr_reader :history
 
   def display_welcome_message
     system 'clear'
@@ -409,21 +434,6 @@ class RPSGame # Orchestration engine
     human.choose
     computer.choose
     display_moves
-  end
-
-  def play
-    display_welcome_message
-
-    loop do
-      player_turns
-      round_result
-      display_game_winner
-      break unless play_again?
-      system 'clear'
-    end
-
-    display_history
-    display_goodbye_message
   end
 end
 
