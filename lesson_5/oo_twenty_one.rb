@@ -4,6 +4,76 @@ require 'pry'
 
 MSG = YAML.load_file('twenty_one_message.yml')
 
+module Table
+  CONNECTOR = '+'
+  H_SPACER = '-'
+  V_SPACER = '|'
+
+  def self.display(rows, first_row_header = false)
+    num_columns = number_of_columns(rows)
+    widths = column_widths(rows)
+    h_line = create_line(widths)
+    formatted_rows = rows.map { |row| format_row(row, num_columns, widths) }
+
+    display_rows(formatted_rows, h_line, first_row_header)
+  end
+
+  def self.fixed_width_display(rows, widths, first_row_header = false)
+    num_columns = number_of_columns(rows)
+    h_line = create_line(widths)
+    formatted_rows = rows.map { |row| format_row(row, num_columns, widths) }
+
+    display_rows(formatted_rows, h_line, first_row_header)
+  end
+
+  def self.number_of_columns(rows) # => integer
+    rows.max { |a, b| a.size <=> b.size }.size
+  end
+
+  def self.column_widths(rows) # => array of integers
+    widths = []
+
+    number_of_columns(rows).times do |column|
+      column_content_sizes = rows.map { |row| row[column].to_s.length }
+      widths << column_content_sizes.max
+    end
+
+    widths
+  end
+
+  def self.create_line(column_widths) # => string
+    line = column_widths.map { |length| H_SPACER * (length + 2) }
+    CONNECTOR + line.join(CONNECTOR) + CONNECTOR
+  end
+
+  def self.add_columns(row, add_num) # => array
+    array = row.dup
+    add_num.times { array << '' }
+    array
+  end
+
+  def self.justify(row, widths) # => array
+    row.map.with_index { |element, i| element.to_s.ljust(widths[i]) }
+  end
+
+  def self.format_row(row, num_columns, widths) # => array
+    difference = num_columns - row.size
+    row = add_columns(row, difference) if difference > 0
+    justify(row, widths)
+  end
+
+  def self.display_rows(rows, h_line, first_row_header)
+    puts h_line # first line
+
+    rows.each.with_index do |row, index|
+      puts "#{V_SPACER} #{row.join(' ' + V_SPACER + ' ')} #{V_SPACER}"
+      puts h_line if index == 0 && first_row_header
+    end
+
+    puts h_line # last line
+  end
+end
+
 module Formatting
   private
 
@@ -22,10 +92,6 @@ module Formatting
       array.join(delimiter)
     end
   end
-end
-
-module SystemMsg
-  private
 
   def clear_screen # clears screen
     system 'clear'
@@ -149,8 +215,23 @@ class Participant
 end
 
 class Player < Participant
-  def initialize(name)
-    super
+  include Formatting
+
+  def initialize
+    super(choose_name)
+  end
+
+  def choose_name
+    answer = nil
+
+    loop do
+      prompt MSG['choose_name']
+      answer = gets.chomp.capitalize
+      break unless answer.empty?
+      prompt MSG['invalid_name']
+    end
+
+    answer
   end
 end
 
@@ -161,13 +242,14 @@ class Dealer < Participant
 end
 
 class Game
-  include Formatting, SystemMsg
+  include Formatting
 
   BUST_CONDITION = 21
   DEALER_LIMIT = 17
+  DISPLAY_WIDTH = [76]
 
   def initialize
-    @player = Player.new('some name')
+    @player = Player.new
     @dealer = Dealer.new
     @deck = Deck.new
     @participants = [player, dealer]
@@ -195,6 +277,8 @@ class Game
   attr_reader :player, :dealer, :deck, :participants
 
   def reset
+    clear_screen
+    show_welcome_message
     participants.each { |participant| participant.hand.reset }
     deck.reset
   end
@@ -213,13 +297,18 @@ class Game
   end
 
   def determine_round_result
+    show_cards(player)
+    show_cards(dealer)
+
     busted = who_busted
 
     if !!busted
       show_bust_message(busted)
       award_winner(other_participant(busted))
     else
-      award_winner(who_won)
+      winner = who_won
+      show_outcome_message(winner)
+      award_winner(winner)
     end
   end
 
@@ -228,7 +317,7 @@ class Game
   end
 
   def award_winner(participant)
-    show_win_message(participant)
+    # ...
   end
 
   def who_busted
@@ -245,6 +334,8 @@ class Game
   end
 
   def dealer_turn
+    return if !!who_busted
+    show_turn(dealer)
     loop do
       show_cards(dealer)
 
@@ -255,18 +346,26 @@ class Game
         show_move_choice(dealer, 'stay')
         break
       end
+
+      break if dealer.busted?
     end
+    puts ''
   end
 
   def player_turn
+    show_turn(player)
     loop do
       move = choose_move
       show_move_choice(player, move)    
       hit(player) if move == 'hit'
       break if move == 'stay' || player.busted?
       clear_screen
+      show_welcome_message
+      show_turn(player)
       show_cards(player)
     end
+
+    puts ''
   end
 
   def choose_move
@@ -291,12 +390,24 @@ class Game
     dealer.hand.draw(deck.deal(2))
   end
 
-  def show_win_message(participant)
-    prompt format(MSG['win'], player: participant, num: BUST_CONDITION)
+  def show_outcome_message(participant)
+    message = 
+      [[format(MSG['outcome'], player: participant, num: BUST_CONDITION)],
+       [win_message(participant)]]
+
+    Table.fixed_width_display(message, DISPLAY_WIDTH)
+  end
+
+  def win_message(participant)
+    format(MSG['win'], player: participant)
   end
 
   def show_bust_message(participant)
-    prompt format(MSG['bust'], player: participant, num: BUST_CONDITION)
+    message =
+      [[format(MSG['bust'], player: participant, num: BUST_CONDITION)],
+       [win_message(other_participant(participant))]]
+
+    Table.fixed_width_display(message, DISPLAY_WIDTH)
   end
 
   def show_cards(participant)
@@ -315,14 +426,22 @@ class Game
                   total: player.hand.total)
     prompt format(MSG['hidden_hand'],
                   player: dealer, card: dealer.hand[0])
+    puts ''
   end
 
   def show_welcome_message
-    prompt MSG['welcome']
+    message = [[MSG['welcome']],
+               [format(MSG['instructions'], num: BUST_CONDITION)],
+               [format(MSG['instructions2'], num: BUST_CONDITION)]]
+    Table.fixed_width_display(message, DISPLAY_WIDTH)
   end
 
   def show_exit_message
     prompt MSG['exit']
+  end
+
+  def show_turn(participant)
+    puts format(MSG['turn'], player: participant)
   end
 end
 
