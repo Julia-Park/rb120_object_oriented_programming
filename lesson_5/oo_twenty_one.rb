@@ -1,7 +1,5 @@
 require 'yaml'
 
-require 'pry'
-
 MSG = YAML.load_file('twenty_one_message.yml')
 
 module Table
@@ -159,7 +157,7 @@ class Hand
     cards.reduce(0) do |sum, card|
       value = card.value
 
-      if value == 11 && sum > Game::BUST_CONDITION
+      if value == 11 && sum > (Game::BUST_CONDITION - 11)
         sum + 1
       else
         sum + value
@@ -167,8 +165,8 @@ class Hand
     end
   end
 
-  def draw(new_cards)
-    self.cards += new_cards
+  def <<(new_card)
+    cards << new_card
   end
 
   def [](num)
@@ -196,8 +194,10 @@ class Participant
     @name = name
   end
 
-  def receive_cards(cards)
-    self.hand += cards
+  def draw(cards)
+    cards.each do |card|
+      hand << card
+    end
   end
 
   def busted?
@@ -211,7 +211,6 @@ class Participant
   private
 
   attr_writer :hand
-
 end
 
 class Player < Participant
@@ -220,6 +219,21 @@ class Player < Participant
   def initialize
     super(choose_name)
   end
+
+  def choose_move
+    answer = nil
+
+    loop do
+      prompt MSG['choose']
+      answer = gets.chomp.downcase
+      break if %w(h hit s stay).include?(answer)
+      prompt MSG['invalid']
+    end
+
+    %(h hit).include?(answer) ? 'hit' : 'stay'
+  end
+
+  private
 
   def choose_name
     answer = nil
@@ -239,6 +253,10 @@ class Dealer < Participant
   def initialize
     super('Dealer')
   end
+
+  def choose_move
+    hand.total < Game::DEALER_LIMIT ? 'hit' : 'stay'
+  end
 end
 
 class Game
@@ -256,12 +274,8 @@ class Game
   end
 
   def start
-    clear_screen
-    show_welcome_message
-
     loop do
       deal_cards
-      show_initial_cards
       player_turn
       dealer_turn
       determine_round_result
@@ -277,7 +291,6 @@ class Game
   attr_reader :player, :dealer, :deck, :participants
 
   def reset
-    clear_screen
     show_welcome_message
     participants.each { |participant| participant.hand.reset }
     deck.reset
@@ -297,27 +310,19 @@ class Game
   end
 
   def determine_round_result
-    show_cards(player)
-    show_cards(dealer)
-
     busted = who_busted
 
     if !!busted
       show_bust_message(busted)
-      award_winner(other_participant(busted))
+    elsif player.hand.total == dealer.hand.total
+      show_tie_message
     else
-      winner = who_won
-      show_outcome_message(winner)
-      award_winner(winner)
+      show_outcome_message(who_won)
     end
   end
 
   def who_won
     participants.max_by { |participant| participant.hand.total }
-  end
-
-  def award_winner(participant)
-    # ...
   end
 
   def who_busted
@@ -335,67 +340,72 @@ class Game
 
   def dealer_turn
     return if !!who_busted
-    show_turn(dealer)
+
+    show_dealer_turn_info
+
     loop do
-      show_cards(dealer)
-
-      if dealer.hand.total < DEALER_LIMIT
-        hit(dealer)
-        show_move_choice(dealer, 'hit')
-      else
-        show_move_choice(dealer, 'stay')
-        break
-      end
-
-      break if dealer.busted?
+      move = dealer.choose_move
+      move == 'hit' ? hit(dealer) : show_move_choice(dealer, 'stay')
+      break if move == 'stay' || dealer.busted?
     end
-    puts ''
   end
 
   def player_turn
-    show_turn(player)
+    show_player_turn_info
+
     loop do
-      move = choose_move
-      show_move_choice(player, move)    
-      hit(player) if move == 'hit'
+      move = player.choose_move
+      move == 'hit' ? hit(player) : show_move_choice(player, 'stay')
       break if move == 'stay' || player.busted?
-      clear_screen
-      show_welcome_message
-      show_turn(player)
-      show_cards(player)
+      show_player_turn_info
     end
-
-    puts ''
-  end
-
-  def choose_move
-    answer = nil
-
-    loop do
-      prompt MSG['choose']
-      answer = gets.chomp.downcase
-      break if %w(h hit s stay).include?(answer)
-      prompt MSG['invalid']
-    end
-
-    %(h hit).include?(answer) ? 'hit' : 'stay'
   end
 
   def hit(participant)
-    participant.hand.draw(deck.deal(1))
+    show_move_choice(participant, 'hit')
+    participant.draw(deck.deal(1))
+    show_cards(participant)
   end
 
   def deal_cards
-    player.hand.draw(deck.deal(2))
-    dealer.hand.draw(deck.deal(2))
+    player.draw(deck.deal(2))
+    dealer.draw(deck.deal(2))
+  end
+
+  def hand_totals
+    totals = participants.map do |participant|
+      format(MSG['total'], player: participant, total: participant.hand.total)
+    end
+
+    joinor(totals, ', ', 'and')
+  end
+
+  def show_player_turn_info
+    clear_screen
+    show_welcome_message
+    show_turn(player)
+    show_initial_cards
+  end
+
+  def show_dealer_turn_info
+    puts ''
+    show_turn(dealer)
+    show_cards(dealer)
   end
 
   def show_outcome_message(participant)
-    message = 
-      [[format(MSG['outcome'], player: participant, num: BUST_CONDITION)],
+    message =
+      [[hand_totals],
+       [format(MSG['outcome'], player: participant, num: BUST_CONDITION)],
        [win_message(participant)]]
 
-    Table.fixed_width_display(message, DISPLAY_WIDTH)
+    fixed_table(message)
+  end
+
+  def show_tie_message
+    message = [[hand_totals], [MSG['tie']]]
+
+    fixed_table(message)
   end
 
   def win_message(participant)
@@ -404,10 +414,11 @@ class Game
 
   def show_bust_message(participant)
     message =
-      [[format(MSG['bust'], player: participant, num: BUST_CONDITION)],
+      [[hand_totals],
+       [format(MSG['bust'], player: participant, num: BUST_CONDITION)],
        [win_message(other_participant(participant))]]
 
-    Table.fixed_width_display(message, DISPLAY_WIDTH)
+    fixed_table(message)
   end
 
   def show_cards(participant)
@@ -426,14 +437,13 @@ class Game
                   total: player.hand.total)
     prompt format(MSG['hidden_hand'],
                   player: dealer, card: dealer.hand[0])
-    puts ''
   end
 
   def show_welcome_message
     message = [[MSG['welcome']],
                [format(MSG['instructions'], num: BUST_CONDITION)],
                [format(MSG['instructions2'], num: BUST_CONDITION)]]
-    Table.fixed_width_display(message, DISPLAY_WIDTH)
+    fixed_table(message)
   end
 
   def show_exit_message
@@ -442,6 +452,10 @@ class Game
 
   def show_turn(participant)
     puts format(MSG['turn'], player: participant)
+  end
+
+  def fixed_table(message)
+    Table.fixed_width_display(message, DISPLAY_WIDTH)
   end
 end
 
